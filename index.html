@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex">
+<meta name="referrer" content="no-referrer">
+<title>EcoSurvey · Drive 폴더 선택</title>
+<style>
+  body { margin: 0; padding: 16px; font-family: system-ui, sans-serif; background: #f4f6f8; color: #22313f; }
+  .box { max-width: 480px; margin: 48px auto; background: #fff; border-radius: 14px; padding: 24px;
+         box-shadow: 0 1px 4px rgba(0,0,0,.12); text-align: center; }
+  h1 { font-size: 20px; margin: 0 0 12px; }
+  p { line-height: 1.5; margin: 8px 0; }
+  .btn { display: inline-block; margin: 12px 6px 0; padding: 12px 20px; border-radius: 10px; border: 0;
+         background: #2f4858; color: #fff; font-size: 16px; text-decoration: none; cursor: pointer; }
+  .btn.sub { background: #fff; color: #2f4858; border: 1px solid #2f4858; }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<div class="box">
+  <h1 id="title">EcoSurvey</h1>
+  <p id="msg"></p>
+  <button id="open" class="btn" hidden></button>
+  <a id="back" class="btn sub" hidden></a>
+</div>
+<script>
+  // 이 페이지는 EcoSurvey 앱이 "공유 폴더 고르기"를 누르면 Chrome으로 연다.
+  // 앱이 넘긴 토큰(#t)으로 Google Picker를 띄우고, 고른 폴더를 앱으로 돌려준다.
+  var API_KEY = 'AIzaSyAV8jg5ylOQgcSmfZQh7tiFd5uZYvEvfdo'; // Google Picker API 전용 키
+  var APP_ID = '698722946529';                              // Google Cloud 프로젝트 번호
+
+  var params = new URLSearchParams(location.hash.slice(1));
+  history.replaceState(null, '', location.pathname); // 주소창에서 토큰을 지운다
+  var token = params.get('t');
+  var state = params.get('s') || '';
+  var lang = params.get('l') === 'en' ? 'en' : 'ko';
+
+  var T = lang === 'ko' ? {
+    title: 'Drive 폴더 선택',
+    loading: '폴더 선택 화면을 여는 중…',
+    noToken: '앱의 저장목록 → Drive 설정 → 올릴 위치 → 공유 폴더 고르기에서 다시 열어 주세요.',
+    open: '폴더 고르기',
+    back: '앱으로 돌아가기',
+    picked: '선택한 폴더: ',
+    canceled: '선택을 취소했습니다.',
+    failed: '폴더 선택 화면을 열지 못했습니다.',
+    shared: '공유 문서함', drives: '공유 드라이브', mine: '내 드라이브'
+  } : {
+    title: 'Choose a Drive folder',
+    loading: 'Opening the folder picker…',
+    noToken: 'Open this again from the app: Saved files → Drive settings → Upload location → Choose a shared folder.',
+    open: 'Choose a folder',
+    back: 'Back to the app',
+    picked: 'Selected folder: ',
+    canceled: 'Selection canceled.',
+    failed: 'Could not open the folder picker.',
+    shared: 'Shared with me', drives: 'Shared drives', mine: 'My Drive'
+  };
+
+  var $ = function (id) { return document.getElementById(id); };
+  document.documentElement.lang = lang;
+  $('title').textContent = T.title;
+  $('open').textContent = T.open;
+  $('back').textContent = T.back;
+
+  function backUrl(extra) {
+    var q = new URLSearchParams({ s: state });
+    Object.keys(extra || {}).forEach(function (k) { q.set(k, extra[k]); });
+    return 'intent://drive-picker?' + q.toString() +
+      '#Intent;scheme=ecosurvey;package=com.yelab.ecosurvey;end';
+  }
+
+  function goBack(extra, message) {
+    $('msg').textContent = message;
+    $('open').hidden = true;
+    var url = backUrl(extra);
+    $('back').href = url;
+    $('back').hidden = false;
+    location.href = url;
+  }
+
+  function showPicker() {
+    try {
+      var FOLDER = 'application/vnd.google-apps.folder';
+      var view = function () {
+        return new google.picker.DocsView(google.picker.ViewId.FOLDERS)
+          .setIncludeFolders(true).setSelectFolderEnabled(true).setMimeTypes(FOLDER);
+      };
+      new google.picker.PickerBuilder()
+        .addView(view().setOwnedByMe(false).setLabel(T.shared))
+        .addView(view().setEnableDrives(true).setLabel(T.drives))
+        .addView(view().setParent('root').setLabel(T.mine))
+        .enableFeature(google.picker.Feature.SUPPORT_DRIVES)
+        .setOAuthToken(token)
+        .setDeveloperKey(API_KEY)
+        .setAppId(APP_ID)
+        .setLocale(lang)
+        .setOrigin(location.origin)
+        .setCallback(function (data) {
+          var action = data[google.picker.Response.ACTION];
+          if (action === google.picker.Action.PICKED) {
+            var doc = data[google.picker.Response.DOCUMENTS][0];
+            var id = doc[google.picker.Document.ID];
+            var name = doc[google.picker.Document.NAME] || '';
+            goBack({ id: id, name: name }, T.picked + name);
+          } else if (action === google.picker.Action.CANCEL) {
+            $('msg').textContent = T.canceled;
+            $('open').hidden = false;
+            $('back').href = backUrl({});
+            $('back').hidden = false;
+          }
+        })
+        .build()
+        .setVisible(true);
+    } catch (e) {
+      $('msg').textContent = T.failed + ' (' + (e && e.message || e) + ')';
+    }
+  }
+
+  $('open').onclick = showPicker;
+
+  if (!token) {
+    $('msg').textContent = T.noToken;
+  } else {
+    $('msg').textContent = T.loading;
+    var s = document.createElement('script');
+    s.src = 'https://apis.google.com/js/api.js';
+    s.onload = function () { gapi.load('picker', { callback: showPicker }); };
+    s.onerror = function () { $('msg').textContent = T.failed; };
+    document.head.appendChild(s);
+  }
+</script>
+</body>
+</html>
